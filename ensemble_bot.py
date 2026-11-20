@@ -23,7 +23,7 @@ import asyncio
 import logging
 import os
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -109,6 +109,7 @@ class Settings:
     providers: dict[str, ProviderSettings]
     ledger_path: str
     max_concurrent_questions: int
+    max_concurrent_claude_searches: int
     request_timeout: int
     asknews_enabled: bool
 
@@ -151,6 +152,9 @@ class Settings:
             providers={p.name: p for p in candidates if _has_key(p.key_env)},
             ledger_path=_env("BOT_LEDGER_PATH", "state/spend_ledger.json"),
             max_concurrent_questions=int(_env("BOT_MAX_CONCURRENT_QUESTIONS", "4")),
+            max_concurrent_claude_searches=int(
+                _env("BOT_MAX_CONCURRENT_CLAUDE_SEARCHES", "2")
+            ),
             request_timeout=int(_env("BOT_REQUEST_TIMEOUT_SECONDS", "600")),
             asknews_enabled=(
                 _has_key("ASKNEWS_CLIENT_ID") and _has_key("ASKNEWS_SECRET")
@@ -182,6 +186,11 @@ _current_slot: ContextVar[Slot | None] = ContextVar("_current_slot", default=Non
 _cost_sink: ContextVar[dict[str, float] | None] = ContextVar("_cost_sink", default=None)
 
 
+# Web search outcome of the research call running in the current task:
+# {"ok": successful searches, "errors": Counter of error codes}.
+_search_report: ContextVar[dict | None] = ContextVar("_search_report", default=None)
+
+
 class CostedLlm(GeneralLlm):
     """
     GeneralLlm that adds the cost of each completed call to the current
@@ -202,6 +211,28 @@ class CostedLlm(GeneralLlm):
         if sink is not None:
             sink[self.provider] += response.cost or 0.0
         return response
+
+    async def _call_litellm(self, prompt):  # type: ignore[override]
+        response = await super()._call_litellm(prompt)
+        try:
+            self._note_web_searches(response)
+        except Exception as error:  # diagnostics must never break a forecast
+            logger.debug(f"Could not read web search results: {error}")
+        return response
+
+    def _note_web_searches(self, response) -> None:
+        """Count successful and failed Anthropic web searches of one call."""
+        report = _search_report.get()
+        if report is None:
+            return
+        message = response.choices[0].message
+        fields = getattr(message, "provider_specific_fields", None) or {}
+        for result in fields.get("web_search_results") or []:
+            content = result.get("content") if isinstance(result, dict) else None
+            if isinstance(content, dict) and content.get("error_code"):
+                report["errors"][content["error_code"]] += 1
+            else:
+                report["ok"] += 1
 
 
 class LlmFactory:
@@ -269,6 +300,19 @@ class LlmFactory:
         )
 
 
+# Per-question facts for the run summary (research sources, search errors,
+# forecasts that succeeded, cost). Shared by the tasks of one question.
+_question_notes: ContextVar[dict | None] = ContextVar("_question_notes", default=None)
+
+_SEARCH_RETRY_PAUSE_SECONDS = 30
+
+
+def _trim(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit("\n", 1)[0] + "\n\n[Research shortened for display.]"
+
+
 # --------------------------------------------------------------------- bot
 
 
@@ -278,7 +322,9 @@ class EnsembleBot(FallTemplateBot2026):
         self._ledger = ledger
         self._factory = LlmFactory(settings)
         self._question_semaphore: asyncio.Semaphore | None = None
+        self._claude_search_semaphore: asyncio.Semaphore | None = None
         self._asknews_lock: asyncio.Lock | None = None
+        self.diagnostics: list[dict] = []  # one entry per question, for the run summary
         return self
 
     # The template's forecasting methods ask for the "default" and "parser"
@@ -350,7 +396,44 @@ class EnsembleBot(FallTemplateBot2026):
         self, question: MetaculusQuestion, provider: str, max_searches: int
     ) -> str:
         llm = self._factory.web_researcher(provider, max_searches)
-        return await llm.invoke(self._web_research_prompt(question))
+        prompt = self._web_research_prompt(question)
+        if provider != "anthropic":
+            return await llm.invoke(prompt)
+
+        # Claude's web search is rate limited per organization, so only a few
+        # research calls run at once, and a call whose searches all failed is
+        # repeated once after a pause.
+        if self._claude_search_semaphore is None:
+            self._claude_search_semaphore = asyncio.Semaphore(
+                self._settings.max_concurrent_claude_searches
+            )
+        totals = {"ok": 0, "errors": Counter()}
+        text = ""
+        async with self._claude_search_semaphore:
+            for attempt in (1, 2):
+                report = {"ok": 0, "errors": Counter()}
+                _search_report.set(report)
+                text = await llm.invoke(prompt)
+                totals["ok"] += report["ok"]
+                totals["errors"].update(report["errors"])
+                if report["ok"] > 0 or not report["errors"] or attempt == 2:
+                    break
+                logger.warning(
+                    f"Claude web search failed for {question.page_url} "
+                    f"({dict(report['errors'])}); retrying once in 30 seconds"
+                )
+                await asyncio.sleep(_SEARCH_RETRY_PAUSE_SECONDS)
+        notes = _question_notes.get()
+        if notes is not None:
+            notes["claude_searches_ok"] = totals["ok"]
+            notes["claude_search_errors"] = dict(totals["errors"])
+        if totals["ok"] == 0 and totals["errors"]:
+            # A briefing written without any search result is the model's
+            # memory presented as research, so it is left out.
+            raise RuntimeError(
+                f"All Claude web searches failed: {dict(totals['errors'])}"
+            )
+        return text
 
     async def _asknews_research(self, question: MetaculusQuestion) -> str:
         if self._asknews_lock is None:
@@ -398,6 +481,9 @@ class EnsembleBot(FallTemplateBot2026):
                 )
             elif result and result.strip():
                 sections.append(f"## {label}\n{result.strip()}")
+        notes = _question_notes.get()
+        if notes is not None:
+            notes["research_sources"] = f"{len(sections)}/{len(sources)}"
         research = "\n\n".join(sections)
         logger.info(f"Research for {question.page_url}:\n{research}")
         return research
@@ -430,7 +516,10 @@ class EnsembleBot(FallTemplateBot2026):
             logger.info(f"Plan for {question.page_url}: {plan}")
 
             costs: dict[str, float] = defaultdict(float)
+            notes: dict[str, Any] = {"url": question.page_url, "plan": dict(plan)}
             _cost_sink.set(costs)  # inherited by the tasks started below
+            _question_notes.set(notes)
+            valid_predictions: list = []
             try:
                 research = await self._ensemble_research(question, plan)
                 valid_predictions, errors, exception_group = (
@@ -445,6 +534,10 @@ class EnsembleBot(FallTemplateBot2026):
                     if tier != OFF:
                         self._ledger.record(provider, tier, costs[provider])
                 self._ledger.save()
+                notes["forecasts"] = f"{len(valid_predictions)}/{len(slots)}"
+                notes["cost"] = {name: round(value, 4) for name, value in costs.items()}
+                self.diagnostics.append(notes)
+                logger.info(f"Diagnostics: {notes}")
 
             if errors:
                 logger.warning(f"Errors while predicting {question.page_url}: {errors}")
@@ -456,7 +549,7 @@ class EnsembleBot(FallTemplateBot2026):
                 )
             return ResearchWithPredictions(
                 research_report=research,
-                summary_report=research[:6000] or "No research was available.",
+                summary_report=_trim(research, 12000) or "No research was available.",
                 errors=errors,
                 predictions=valid_predictions,
             )
@@ -542,6 +635,21 @@ async def run(mode: str, publish: bool, max_questions: int | None) -> int:
         f"Questions attempted: {len(reports)}, failed: {len(failures)}\n\n"
         f"{ledger.summary_markdown()}\n"
     )
+    if bot.diagnostics:
+        summary += (
+            "\n| Question | Tiers | Research sources | Claude searches | "
+            "Forecasts | Cost |\n|---|---|---|---|---|---|\n"
+        )
+        for notes in bot.diagnostics:
+            searches = f"{notes.get('claude_searches_ok', '-')} ok"
+            if notes.get("claude_search_errors"):
+                searches += f", errors {notes['claude_search_errors']}"
+            cost = ", ".join(f"{k} ${v:.2f}" for k, v in notes.get("cost", {}).items())
+            summary += (
+                f"| {notes.get('url')} | {notes.get('plan')} | "
+                f"{notes.get('research_sources', '-')} | {searches} | "
+                f"{notes.get('forecasts', '-')} | {cost} |\n"
+            )
     print(summary)
     step_summary = os.getenv("GITHUB_STEP_SUMMARY")
     if step_summary:

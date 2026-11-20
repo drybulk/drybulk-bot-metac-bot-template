@@ -29,6 +29,7 @@ class MockState:
         self.requests: list[dict] = []
         self.fail_paths: set[str] = set()  # paths that should return HTTP 500
         self.fail_models: set[str] = set()
+        self.search_error_code: str | None = None  # make Claude web searches fail
         self.lock = threading.Lock()
 
 
@@ -159,6 +160,13 @@ def make_handler(state: MockState):
                         },
                     ]
                     usage["server_tool_use"] = {"web_search_requests": 1}
+                    if state.search_error_code:
+                        content[1]["content"] = {
+                            "type": "web_search_tool_result_error",
+                            "error_code": state.search_error_code,
+                        }
+                        content[2].pop("citations")
+                        usage["server_tool_use"] = {"web_search_requests": 0}
                 payload = {
                     "id": "msg_mock",
                     "type": "message",

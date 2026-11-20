@@ -2,6 +2,10 @@ name: Test Bot
 
 on:
   workflow_dispatch:
+    inputs:
+      max_questions:
+        description: "How many practice questions to forecast"
+        default: "4"
 
 # Add concurrency group to prevent parallel runs
 # One shared group: the tournament run and the test run both update the spend
@@ -35,7 +39,7 @@ jobs:
         run: uv sync --locked
       - name: Run bot
         run: |
-          uv run python ensemble_bot.py --mode test_questions --max-questions 4
+          uv run python ensemble_bot.py --mode test_questions --max-questions ${{ inputs.max_questions || 4 }}
         # this reads the environment variables from the github repository.
         # Store under Settings --> Secrets and variables --> Actions
         env:

@@ -240,6 +240,36 @@ def test_provider_outage() -> None:
         check(ledger.spend("openai") > 0 and ledger.spend("anthropic") == 0, "only the working provider is charged")
 
 
+def test_claude_search_failure() -> None:
+    print("Claude web searches failing")
+    import ensemble_bot
+
+    ensemble_bot._SEARCH_RETRY_PAUSE_SECONDS = 0
+    with tempfile.TemporaryDirectory() as folder:
+        os.environ["BOT_LEDGER_PATH"] = str(Path(folder) / "ledger.json")
+        settings = Settings.from_env()
+        ledger = SpendLedger(settings.ledger_path, settings.budgets)
+        bot = build_bot(settings, ledger, publish=False, skip_done=False)
+        start = len(STATE.requests)
+        STATE.search_error_code = "too_many_requests"
+        try:
+            reports = asyncio.run(bot.forecast_questions(questions()[:1], return_exceptions=True))
+        finally:
+            STATE.search_error_code = None
+        requests = STATE.requests[start:]
+        claude_searches = [r for r in requests if r["body"].get("tools") and r["path"].endswith("/messages")]
+        report = reports[0]
+        check(isinstance(report, ForecastReport), "question still forecast")
+        check(len(claude_searches) == 2, "the failed research call is repeated once")
+        check("Web research (anthropic" not in report.explanation and "Web research (openai" in report.explanation, "a briefing without any search result is left out, the other one is kept")
+        notes = bot.diagnostics[0]
+        check(notes["claude_search_errors"] == {"too_many_requests": 2} and notes["claude_searches_ok"] == 0, "search errors are recorded for the run summary")
+        check(notes["research_sources"] == "1/2" and notes["forecasts"] == "6/6", "summary shows 1 of 2 research sources and 6 of 6 forecasts")
+
+        reports = asyncio.run(bot.forecast_questions(questions()[:1], return_exceptions=True))
+        check(bot.diagnostics[1]["claude_searches_ok"] == 1 and bot.diagnostics[1]["research_sources"] == "2/2", "working searches are counted and both briefings are used")
+
+
 def test_entry_point() -> None:
     print("command line entry point")
     import ensemble_bot
@@ -267,7 +297,9 @@ def test_entry_point() -> None:
             saved = json.loads((Path(folder) / "ledger.json").read_text())
             entry = next(iter(saved["cycles"]["openai"].values()))
             check(entry["questions"] == 3, "already-forecast questions are skipped and --max-questions caps the run at 3")
-            check("| openai |" in (Path(folder) / "summary.md").read_text(), "spend table is written to the workflow summary")
+            summary_text = (Path(folder) / "summary.md").read_text()
+            check("| openai |" in summary_text, "spend table is written to the workflow summary")
+            check("| https://example.com/q/2 |" in summary_text and "6/6" in summary_text, "per-question diagnostics are written to the workflow summary")
             check("gpt-4o" not in " ".join(done), "no outdated default model is ever called")
 
             STATE.fail_paths.update({"/v1/messages", "/v1/chat/completions", "/v1/responses"})
@@ -287,5 +319,6 @@ if __name__ == "__main__":
     test_provider_over_budget()
     test_reduced_tier()
     test_provider_outage()
+    test_claude_search_failure()
     test_entry_point()
     print("\nAll offline tests passed.")
