@@ -52,8 +52,8 @@ jobs:
           # in ensemble_bot.py.
           BOT_ANTHROPIC_MONTHLY_BUDGET: ${{ vars.BOT_ANTHROPIC_MONTHLY_BUDGET }}
           BOT_OPENAI_MONTHLY_BUDGET: ${{ vars.BOT_OPENAI_MONTHLY_BUDGET }}
-          BOT_ANTHROPIC_RESET_DAY: ${{ vars.BOT_ANTHROPIC_RESET_DAY }}
-          BOT_OPENAI_RESET_DAY: ${{ vars.BOT_OPENAI_RESET_DAY }}
+          BOT_ANTHROPIC_RESET_DAY: ${{ vars.BOT_ANTHROPIC_RESET_DAY || '23' }} # day of month the credit resets
+          BOT_OPENAI_RESET_DAY: ${{ vars.BOT_OPENAI_RESET_DAY || '5' }} # day of month the credit resets
           BOT_ANTHROPIC_STRONG: ${{ vars.BOT_ANTHROPIC_STRONG }}
           BOT_ANTHROPIC_MID: ${{ vars.BOT_ANTHROPIC_MID }}
           BOT_OPENAI_STRONG: ${{ vars.BOT_OPENAI_STRONG }}

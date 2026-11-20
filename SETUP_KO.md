@@ -54,8 +54,8 @@ API 키와 토큰은 대화창에 붙여 넣지 마시고, 아래 4번에 적힌
 |---|---|---|
 | `BOT_ANTHROPIC_MONTHLY_BUDGET` | 85 | Claude 쪽 월 예산(달러) |
 | `BOT_OPENAI_MONTHLY_BUDGET` | 85 | GPT 쪽 월 예산(달러) |
-| `BOT_ANTHROPIC_RESET_DAY` | 1 | Claude 크레딧이 초기화되는 날 |
-| `BOT_OPENAI_RESET_DAY` | 1 | GPT 크레딧이 초기화되는 날 |
+| `BOT_ANTHROPIC_RESET_DAY` | 23 | Claude 크레딧이 초기화되는 날(이 저장소의 워크플로에 23일로 지정) |
+| `BOT_OPENAI_RESET_DAY` | 5 | GPT 크레딧이 초기화되는 날(이 저장소의 워크플로에 5일로 지정) |
 | `BOT_ANTHROPIC_STRONG` | anthropic/claude-opus-5-5 | Claude 쪽 주력 예측 모델 |
 | `BOT_ANTHROPIC_MID` | anthropic/claude-sonnet-5-5 | Claude 쪽 조사 모델 겸 절약 단계의 예측 모델 |
 | `BOT_OPENAI_STRONG` | openai/gpt-6.2-astra | GPT 쪽 주력 예측 모델 |
