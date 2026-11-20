@@ -2,8 +2,9 @@ name: Forecast on Metaculus Cup
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 */2 * *" # runs at midnight every 2 days
+  # The schedule is turned off in this fork: this workflow runs the template bot
+  # (main.py), which is outside the spend ledger of ensemble_bot.py, and the
+  # Metaculus Cup has no prize for bots. It can still be started by hand.
 
 # Add concurrency group to prevent parallel runs
 concurrency:

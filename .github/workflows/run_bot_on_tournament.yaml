@@ -6,15 +6,22 @@ on:
     - cron: "7,27,47 * * * *" # every 20 min, offset off the hour. Make sure to skip already-forecasted questions!
 
 # Add concurrency group to prevent parallel runs
+# One shared group: the tournament run and the test run both update the spend
+# ledger, so they must not run at the same time.
 concurrency:
-  group: ${{ github.workflow }}
+  group: forecast-bot
   cancel-in-progress: false
+
+# Needed to commit the spend ledger back to the repository.
+permissions:
+  contents: write
 
 
 # Daily job to run the simple forecast bot
 jobs:
   forecast_job:
     runs-on: ubuntu-latest # determines the machine that will run the job - keep as is
+    timeout-minutes: 150 # unfinished questions are picked up by the next run
     steps: # sets up the steps that will be run in order
       # setup repository with all necessary dependencies - keep as is
       - name: Check out repository
@@ -30,7 +37,7 @@ jobs:
         run: uv sync --locked
       - name: Run bot
         run: |
-          uv run python main.py
+          uv run python ensemble_bot.py --mode tournament
         # this reads the environment variables from the github repository.
         # Store under Settings --> Secrets and variables --> Actions
         env:
@@ -42,3 +49,27 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
           ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}
+          # Optional settings. Set them under Settings --> Secrets and variables
+          # --> Actions --> Variables. Unset variables fall back to the defaults
+          # in ensemble_bot.py.
+          BOT_ANTHROPIC_MONTHLY_BUDGET: ${{ vars.BOT_ANTHROPIC_MONTHLY_BUDGET }}
+          BOT_OPENAI_MONTHLY_BUDGET: ${{ vars.BOT_OPENAI_MONTHLY_BUDGET }}
+          BOT_ANTHROPIC_RESET_DAY: ${{ vars.BOT_ANTHROPIC_RESET_DAY }}
+          BOT_OPENAI_RESET_DAY: ${{ vars.BOT_OPENAI_RESET_DAY }}
+          BOT_ANTHROPIC_STRONG: ${{ vars.BOT_ANTHROPIC_STRONG }}
+          BOT_ANTHROPIC_MID: ${{ vars.BOT_ANTHROPIC_MID }}
+          BOT_OPENAI_STRONG: ${{ vars.BOT_OPENAI_STRONG }}
+          BOT_OPENAI_MID: ${{ vars.BOT_OPENAI_MID }}
+      - name: Save spend ledger
+        if: always()
+        run: |
+          if [ -f state/spend_ledger.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state/spend_ledger.json
+            if ! git diff --cached --quiet; then
+              git commit -m "Update spend ledger"
+              git pull --rebase
+              git push
+            fi
+          fi
