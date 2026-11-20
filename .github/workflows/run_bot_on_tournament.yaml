@@ -2,10 +2,10 @@ name: Forecast on new AI tournament questions
 
 on:
   workflow_dispatch:
-  # The schedule stays off until the "Test Bot" workflow has passed with real
-  # keys. To turn it on, uncomment the two lines below.
-  # schedule:
-  #   - cron: "7,27,47 * * * *" # every 20 min, offset off the hour. Make sure to skip already-forecasted questions!
+  # Turned on 2026-11-20 after the "Test Bot" workflow passed with real keys.
+  # To pause the bot, comment out the two lines below.
+  schedule:
+    - cron: "7,27,47 * * * *" # every 20 min, offset off the hour. Make sure to skip already-forecasted questions!
 
 # Add concurrency group to prevent parallel runs
 # One shared group: the tournament run and the test run both update the spend
