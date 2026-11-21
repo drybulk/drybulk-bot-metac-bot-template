@@ -5,7 +5,7 @@ on:
   # Turned on 2026-11-20 after the "Test Bot" workflow passed with real keys.
   # To pause the bot, comment out the two lines below.
   schedule:
-    - cron: "3,23,43 * * * *" # every 20 min, offset off the hour. Make sure to skip already-forecasted questions!
+    - cron: "11,31,51 * * * *" # every 20 min, offset off the hour. Make sure to skip already-forecasted questions!
 
 # Add concurrency group to prevent parallel runs
 # One shared group: the tournament run and the test run both update the spend
