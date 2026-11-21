@@ -1,0 +1,25 @@
+name: Start the tournament forecast on a schedule
+
+# GitHub did not start scheduled runs of "Forecast on new AI tournament
+# questions" in this fork. This separate workflow carries its own schedule and
+# starts that workflow. If both schedules turn out to work, the extra start
+# finds no new questions and ends within a minute; remove one of the two then.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17,37,57 * * * *"
+
+# Needed to start another workflow.
+permissions:
+  actions: write
+
+jobs:
+  start_forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start the tournament forecast workflow
+        run: gh workflow run run_bot_on_tournament.yaml --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
