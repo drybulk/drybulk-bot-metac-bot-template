@@ -2,28 +2,28 @@
   "cycles": {
     "anthropic": {
       "2026-10-23": {
-        "questions": 8,
-        "spend_usd": 2.467982,
+        "questions": 9,
+        "spend_usd": 2.763615,
         "tiers": {
           "full": {
-            "cost_usd": 2.467982,
-            "n": 8
+            "cost_usd": 2.763615,
+            "n": 9
           }
         },
-        "updated_at": "2026-11-21T12:06:55+00:00"
+        "updated_at": "2026-11-21T21:15:52+00:00"
       }
     },
     "openai": {
       "2026-11-05": {
-        "questions": 8,
-        "spend_usd": 2.310814,
+        "questions": 9,
+        "spend_usd": 2.60948,
         "tiers": {
           "full": {
-            "cost_usd": 2.310814,
-            "n": 8
+            "cost_usd": 2.60948,
+            "n": 9
           }
         },
-        "updated_at": "2026-11-21T12:06:55+00:00"
+        "updated_at": "2026-11-21T21:15:52+00:00"
       }
     }
   },
