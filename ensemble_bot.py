@@ -313,6 +313,18 @@ def _trim(text: str, limit: int) -> str:
     return text[:limit].rsplit("\n", 1)[0] + "\n\n[Research shortened for display.]"
 
 
+def _short_time(value: Any) -> str:
+    """Format a question time as 'YYYY-MM-DD HH:MM' in UTC, or '-' if unknown."""
+    if value is None:
+        return "-"
+    try:
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc)
+        return value.strftime("%Y-%m-%d %H:%M")
+    except (AttributeError, ValueError):
+        return str(value)
+
+
 # --------------------------------------------------------------------- bot
 
 
@@ -516,7 +528,14 @@ class EnsembleBot(FallTemplateBot2026):
             logger.info(f"Plan for {question.page_url}: {plan}")
 
             costs: dict[str, float] = defaultdict(float)
-            notes: dict[str, Any] = {"url": question.page_url, "plan": dict(plan)}
+            notes: dict[str, Any] = {
+                "url": question.page_url,
+                "plan": dict(plan),
+                # How long questions stay open decides how often the bot must
+                # run, so the run summary shows both times.
+                "opened": _short_time(getattr(question, "open_time", None)),
+                "closes": _short_time(getattr(question, "close_time", None)),
+            }
             _cost_sink.set(costs)  # inherited by the tasks started below
             _question_notes.set(notes)
             valid_predictions: list = []
@@ -637,8 +656,8 @@ async def run(mode: str, publish: bool, max_questions: int | None) -> int:
     )
     if bot.diagnostics:
         summary += (
-            "\n| Question | Tiers | Research sources | Claude searches | "
-            "Forecasts | Cost |\n|---|---|---|---|---|---|\n"
+            "\n| Question | Opened (UTC) | Closes (UTC) | Tiers | Research sources | "
+            "Claude searches | Forecasts | Cost |\n|---|---|---|---|---|---|---|---|\n"
         )
         for notes in bot.diagnostics:
             searches = f"{notes.get('claude_searches_ok', '-')} ok"
@@ -646,7 +665,8 @@ async def run(mode: str, publish: bool, max_questions: int | None) -> int:
                 searches += f", errors {notes['claude_search_errors']}"
             cost = ", ".join(f"{k} ${v:.2f}" for k, v in notes.get("cost", {}).items())
             summary += (
-                f"| {notes.get('url')} | {notes.get('plan')} | "
+                f"| {notes.get('url')} | {notes.get('opened', '-')} | "
+                f"{notes.get('closes', '-')} | {notes.get('plan')} | "
                 f"{notes.get('research_sources', '-')} | {searches} | "
                 f"{notes.get('forecasts', '-')} | {cost} |\n"
             )
