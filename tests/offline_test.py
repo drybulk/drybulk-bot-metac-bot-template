@@ -210,6 +210,9 @@ def test_reduced_tier() -> None:
         path = Path(folder) / "ledger.json"
         os.environ["BOT_LEDGER_PATH"] = str(path)
         os.environ["BOT_OPENAI_MONTHLY_BUDGET"] = "10"
+        # Start the cycle today. Late in a cycle the pace lines reach the whole
+        # budget, and this spend would correctly count as "full".
+        os.environ["BOT_OPENAI_RESET_DAY"] = str(datetime.now(timezone.utc).day)
         try:
             settings = Settings.from_env()
             seeded = SpendLedger(path, settings.budgets)
@@ -218,10 +221,12 @@ def test_reduced_tier() -> None:
             reports, requests, _ = run_bot(path, questions()[:1])
         finally:
             del os.environ["BOT_OPENAI_MONTHLY_BUDGET"]
+            del os.environ["BOT_OPENAI_RESET_DAY"]
         forecasts = [r for r in requests if "convert the text" not in json.dumps(r["body"]) and not r["body"].get("tools")]
         counts = model_counts(forecasts)
         expected_tier = seeded.choose_tier("openai")
         check(isinstance(reports[0], ForecastReport), "question still forecast")
+        check(expected_tier in ("reduced", "minimal"), f"spend above the pace lines gives a reduced tier (got '{expected_tier}')")
         check(counts["gpt-6.2-astra"] == 0, f"tier '{expected_tier}' drops the expensive OpenAI model")
         check(counts["claude-opus-5-5"] == 3, "the other provider stays at full")
 
@@ -283,8 +288,25 @@ def test_entry_point() -> None:
         fetched[0].already_forecasted = True  # must be skipped in tournament mode
         return fetched
 
+    async def fake_filter(self, api_filter, num_questions=None, **kwargs):
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        recent = questions()
+        # one forecast, one closed without a forecast, one still open
+        recent[0].already_forecasted = True
+        recent[1].already_forecasted = False
+        recent[1].open_time = now - timedelta(hours=5)
+        recent[1].close_time = now - timedelta(hours=2)
+        recent[2].already_forecasted = False
+        recent[2].open_time = now - timedelta(hours=1)
+        recent[2].close_time = now + timedelta(hours=2)
+        return recent
+
     original = MetaculusClient.get_all_open_questions_from_tournament
+    original_filter = MetaculusClient.get_questions_matching_filter
     MetaculusClient.get_all_open_questions_from_tournament = fake_fetch
+    MetaculusClient.get_questions_matching_filter = fake_filter
     try:
         with tempfile.TemporaryDirectory() as folder:
             os.environ["BOT_LEDGER_PATH"] = str(Path(folder) / "ledger.json")
@@ -301,6 +323,9 @@ def test_entry_point() -> None:
             check("| openai |" in summary_text, "spend table is written to the workflow summary")
             check("| https://example.com/q/2 |" in summary_text and "6/6" in summary_text, "per-question diagnostics are written to the workflow summary")
             check("gpt-4o" not in " ".join(done), "no outdated default model is ever called")
+            check("| minibench | 3 | 1 | 1 | 1 |" in summary_text, "coverage table counts forecast, missed and still-open questions")
+            missed_part = summary_text.split("| Missed question |")[-1]
+            check(summary_text.count("| Missed question |") == 1 and missed_part.count("https://example.com/q/2") == 2 and "q/3" not in missed_part, "only questions that closed without a forecast are listed as missed")
 
             STATE.fail_paths.update({"/v1/messages", "/v1/chat/completions", "/v1/responses"})
             try:
@@ -310,6 +335,7 @@ def test_entry_point() -> None:
             check(code == 1, "run exits with status 1 when most questions fail")
     finally:
         MetaculusClient.get_all_open_questions_from_tournament = original
+        MetaculusClient.get_questions_matching_filter = original_filter
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
 
 

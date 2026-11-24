@@ -26,7 +26,7 @@ import sys
 from collections import Counter, defaultdict
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import dotenv
@@ -41,6 +41,7 @@ from bot_helpers import (
 silence_noisy_dependencies()
 
 from forecasting_tools import (  # noqa: E402
+    ApiFilter,
     AskNewsSearcher,
     ForecastReport,
     GeneralLlm,
@@ -323,6 +324,64 @@ def _short_time(value: Any) -> str:
         return value.strftime("%Y-%m-%d %H:%M")
     except (AttributeError, ValueError):
         return str(value)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+COVERAGE_DAYS = 7
+
+
+async def coverage_markdown(client: MetaculusClient, tournament_ids: list) -> str:
+    """
+    Count the tournament questions that opened in the last days and split them
+    into forecast, missed (closed without a forecast from this account) and
+    still open. Tournament questions stay open for a few hours only, so this
+    shows whether the bot runs often enough.
+    """
+    now = datetime.now(timezone.utc)
+    rows: list[str] = []
+    missed_lines: list[str] = []
+    for tournament_id in tournament_ids:
+        api_filter = ApiFilter(
+            allowed_tournaments=[tournament_id],
+            open_time_gt=now - timedelta(days=COVERAGE_DAYS),
+            open_time_lt=now,
+        )
+        questions = await client.get_questions_matching_filter(
+            api_filter, num_questions=1000, error_if_question_target_missed=False
+        )
+        forecast = [q for q in questions if q.already_forecasted]
+        pending = [q for q in questions if not q.already_forecasted]
+        missed = [
+            q for q in pending if (_as_utc(q.close_time) or now + timedelta(1)) <= now
+        ]
+        rows.append(
+            f"| {tournament_id} | {len(questions)} | {len(forecast)} | "
+            f"{len(missed)} | {len(pending) - len(missed)} |"
+        )
+        for q in sorted(missed, key=lambda q: _as_utc(q.open_time) or now):
+            missed_lines.append(
+                f"| {q.page_url} | {_short_time(q.open_time)} | "
+                f"{_short_time(q.close_time)} |"
+            )
+    text = (
+        f"\n### Questions opened in the last {COVERAGE_DAYS} days\n\n"
+        "| Tournament | Opened | Forecast | Missed | Still open, no forecast |\n"
+        "|---|---|---|---|---|\n" + "\n".join(rows) + "\n"
+    )
+    if missed_lines:
+        text += (
+            "\n| Missed question | Opened (UTC) | Closed (UTC) |\n|---|---|---|\n"
+            + "\n".join(missed_lines[-40:])
+            + "\n"
+        )
+    return text
 
 
 # --------------------------------------------------------------------- bot
@@ -670,6 +729,12 @@ async def run(mode: str, publish: bool, max_questions: int | None) -> int:
                 f"{notes.get('research_sources', '-')} | {searches} | "
                 f"{notes.get('forecasts', '-')} | {cost} |\n"
             )
+    if mode != "test_questions":
+        try:
+            summary += await coverage_markdown(client, tournament_ids)
+        except Exception as error:  # reporting must never fail the run
+            logger.warning(f"Coverage check failed: {error}")
+            summary += f"\nCoverage check failed: {type(error).__name__}\n"
     print(summary)
     step_summary = os.getenv("GITHUB_STEP_SUMMARY")
     if step_summary:
