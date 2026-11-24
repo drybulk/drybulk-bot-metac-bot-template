@@ -1,0 +1,24 @@
+name: Start the tournament forecast on a schedule (2)
+
+# One of several identical starters. GitHub starts each scheduled workflow in
+# this fork only once every few hours, so several schedules are used to keep
+# the gap between runs below the three hours a question stays open.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "2,22,42 * * * *"
+
+# Needed to start another workflow.
+permissions:
+  actions: write
+
+jobs:
+  start_forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start the tournament forecast workflow
+        run: gh workflow run run_bot_on_tournament.yaml --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
