@@ -288,6 +288,8 @@ def test_entry_point() -> None:
         fetched[0].already_forecasted = True  # must be skipped in tournament mode
         return fetched
 
+    filters: list = []
+
     async def fake_filter(self, api_filter, num_questions=None, **kwargs):
         from datetime import datetime, timedelta, timezone
 
@@ -301,7 +303,13 @@ def test_entry_point() -> None:
         recent[2].already_forecasted = False
         recent[2].open_time = now - timedelta(hours=1)
         recent[2].close_time = now + timedelta(hours=2)
-        return recent
+        # a question that has not opened yet must not be counted
+        upcoming = questions()[0]
+        upcoming.already_forecasted = False
+        upcoming.open_time = now + timedelta(hours=2)
+        upcoming.close_time = now + timedelta(hours=5)
+        filters.append(api_filter)
+        return recent + [upcoming]
 
     original = MetaculusClient.get_all_open_questions_from_tournament
     original_filter = MetaculusClient.get_questions_matching_filter
@@ -324,6 +332,8 @@ def test_entry_point() -> None:
             check("| https://example.com/q/2 |" in summary_text and "6/6" in summary_text, "per-question diagnostics are written to the workflow summary")
             check("gpt-4o" not in " ".join(done), "no outdated default model is ever called")
             check("| minibench | 3 | 1 | 1 | 1 |" in summary_text, "coverage table counts forecast, missed and still-open questions")
+            from datetime import datetime as _dt, timezone as _tz
+            check(all(f.open_time_lt.date() > _dt.now(_tz.utc).date() for f in filters) and len(filters) == 2, "coverage query reaches past today, because the upper bound is sent as a date")
             missed_part = summary_text.split("| Missed question |")[-1]
             check(summary_text.count("| Missed question |") == 1 and missed_part.count("https://example.com/q/2") == 2 and "q/3" not in missed_part, "only questions that closed without a forecast are listed as missed")
 

@@ -351,11 +351,14 @@ async def coverage_markdown(client: MetaculusClient, tournament_ids: list) -> st
         api_filter = ApiFilter(
             allowed_tournaments=[tournament_id],
             open_time_gt=now - timedelta(days=COVERAGE_DAYS),
-            open_time_lt=now,
+            # The library sends this bound to Metaculus as a date without a time,
+            # so "now" would leave out every question that opened today (UTC).
+            open_time_lt=now + timedelta(days=1),
         )
         questions = await client.get_questions_matching_filter(
             api_filter, num_questions=1000, error_if_question_target_missed=False
         )
+        questions = [q for q in questions if (_as_utc(q.open_time) or now) <= now]
         forecast = [q for q in questions if q.already_forecasted]
         pending = [q for q in questions if not q.already_forecasted]
         missed = [
