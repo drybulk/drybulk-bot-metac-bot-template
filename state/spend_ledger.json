@@ -13,28 +13,28 @@
         "updated_at": "2026-11-21T21:15:52+00:00"
       },
       "2026-11-23": {
-        "questions": 9,
-        "spend_usd": 2.761237,
+        "questions": 10,
+        "spend_usd": 3.070391,
         "tiers": {
           "full": {
-            "cost_usd": 2.761237,
-            "n": 9
+            "cost_usd": 3.070391,
+            "n": 10
           }
         },
-        "updated_at": "2026-11-25T03:04:16+00:00"
+        "updated_at": "2026-11-25T06:29:31+00:00"
       }
     },
     "openai": {
       "2026-11-05": {
-        "questions": 18,
-        "spend_usd": 5.124949,
+        "questions": 19,
+        "spend_usd": 5.407284,
         "tiers": {
           "full": {
-            "cost_usd": 5.124949,
-            "n": 18
+            "cost_usd": 5.407284,
+            "n": 19
           }
         },
-        "updated_at": "2026-11-25T03:04:16+00:00"
+        "updated_at": "2026-11-25T06:29:31+00:00"
       }
     }
   },
