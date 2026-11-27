@@ -116,6 +116,18 @@ class SpendLedger:
             return "reduced"
         return "minimal"
 
+    def within_pace(self, provider: str, burst: float = 0.10) -> bool:
+        """
+        True while spend is at or below the linear pace plus a small burst.
+        Stricter than the "full" tier, so optional extras (shadow forecasts)
+        stop well before they could push the submitted ensemble down a tier.
+        """
+        budget = self.budgets[provider]
+        _, elapsed = self._cycle(provider)
+        if budget.budget_usd <= 0:
+            return False
+        return self.spend(provider) <= budget.budget_usd * min(1.0, elapsed + burst)
+
     # --------------------------------------------------------------- updates
     def record(self, provider: str, tier: str, cost_usd: float) -> None:
         """Record what one question cost at one provider."""
