@@ -56,19 +56,27 @@ jobs:
           # in ensemble_bot.py.
           BOT_ANTHROPIC_MONTHLY_BUDGET: ${{ vars.BOT_ANTHROPIC_MONTHLY_BUDGET }}
           BOT_OPENAI_MONTHLY_BUDGET: ${{ vars.BOT_OPENAI_MONTHLY_BUDGET }}
+          # Deep research and shadow forecasts are on by default. Set a variable to 0 to turn one off.
+          BOT_DEEP_RESEARCH: ${{ vars.BOT_DEEP_RESEARCH }}
+          BOT_SHADOW_FORECASTS: ${{ vars.BOT_SHADOW_FORECASTS }}
           BOT_ANTHROPIC_RESET_DAY: ${{ vars.BOT_ANTHROPIC_RESET_DAY || '23' }} # day of month the credit resets
           BOT_OPENAI_RESET_DAY: ${{ vars.BOT_OPENAI_RESET_DAY || '5' }} # day of month the credit resets
           BOT_ANTHROPIC_STRONG: ${{ vars.BOT_ANTHROPIC_STRONG }}
           BOT_ANTHROPIC_MID: ${{ vars.BOT_ANTHROPIC_MID }}
           BOT_OPENAI_STRONG: ${{ vars.BOT_OPENAI_STRONG }}
           BOT_OPENAI_MID: ${{ vars.BOT_OPENAI_MID }}
-      - name: Save spend ledger
+      - name: Save spend ledger and forecast log
         if: always()
         run: |
           if [ -f state/spend_ledger.json ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add state/spend_ledger.json
+            # One line per forecast question, with the submitted and the shadow
+            # forecasts of each model. Used to score them after resolution.
+            if [ -f state/forecast_log.jsonl ]; then
+              git add state/forecast_log.jsonl
+            fi
             if ! git diff --cached --quiet; then
               git commit -m "Update spend ledger"
               git pull --rebase

@@ -59,6 +59,19 @@ def _prompt_text(body: dict) -> str:
 def _answer(prompt: str) -> str:
     if "convert the text to the following" in prompt:
         return _parser_answer(prompt)
+    if "Do not repeat that work" in prompt:
+        # A deep briefing. Real ones run to a few hundred words, and the bot
+        # rejects a very short one as cut off.
+        return (
+            "- Reference class: 12 comparable mock cases since 2010, of which 4 "
+            "ended with the event happening (https://example.com/base-rates).\n"
+            "- The deciding source showed a value of 41.2 on 2026-11-20 "
+            "(https://example.com/source), quoted as 'Mock index: 41.2'.\n"
+            "- A related mock market stood at 35% on 2026-11-19 "
+            "(https://example.com/market).\n"
+            "- The next scheduled mock release is on 2026-12-15, before the "
+            "question resolves. No usable base rate was found for the remaining window."
+        )
     if "You do not produce forecasts yourself" in prompt:
         return (
             "- 2026-11-18: Mock news item relevant to the question "
