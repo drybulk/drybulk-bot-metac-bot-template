@@ -855,9 +855,16 @@ class EnsembleBot(FallTemplateBot2026):
         return prediction
 
     def _shadow_slots(self, plan: dict[str, str]) -> list[Slot]:
+        # Shadow forecasts only measure; they must never use credit that the
+        # submitted forecasts will need later in the cycle. So they run only
+        # while the provider's spend is close to the linear pace.
         slots = []
         for provider, tier in plan.items():
-            if tier != OFF and TIER_PLANS[provider][tier].shadow:
+            if (
+                tier != OFF
+                and TIER_PLANS[provider][tier].shadow
+                and self._ledger.within_pace(provider)
+            ):
                 slots.append(
                     Slot(
                         provider=provider,

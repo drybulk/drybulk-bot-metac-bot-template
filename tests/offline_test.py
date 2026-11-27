@@ -133,6 +133,10 @@ def test_pacing() -> None:
         for spent, expected in ((0, "full"), (74, "full"), (76, "reduced"), (94, "reduced"), (96, "minimal"), (100, "off")):
             ledger._entry("openai")["spend_usd"] = float(spent)
             check(ledger.choose_tier("openai") == expected, f"${spent} spent at mid-cycle -> {expected}")
+        for spent, expected in ((0, True), (59, True), (61, False)):
+            ledger._entry("openai")["spend_usd"] = float(spent)
+            check(ledger.within_pace("openai") is expected, f"${spent} spent at mid-cycle -> within pace: {expected}")
+        ledger._entry("openai")["spend_usd"] = 100.0
         ledger.save()
         reloaded = SpendLedger(Path(folder) / "l.json", budgets, now=now)
         check(reloaded.spend("openai") == 100.0, "ledger survives save and reload")
@@ -358,6 +362,25 @@ def test_deep_research_and_shadow() -> None:
             check(len(searches) == 3 and all(isinstance(r, ForecastReport) for r in reports), "a question that closes in 30 minutes gets the standard research only")
             lines = [json.loads(line) for line in (Path(folder) / "forecast_log.jsonl").read_text().splitlines()]
             check(all(line["shadow"] == [] and line["deep_briefs"] is None for line in lines), "no shadow forecast without a deep briefing")
+
+        # OpenAI spend ahead of the pace, but still in the "full" tier: the
+        # cycle starts today and 20% of the budget is already used.
+        restore_pace = _with_env(BOT_OPENAI_RESET_DAY=str(datetime.now(timezone.utc).day))
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                settings = Settings.from_env()
+                ahead = SpendLedger(Path(folder) / "ledger.json", settings.budgets)
+                ahead._entry("openai")["spend_usd"] = settings.budgets["openai"].budget_usd * 0.2
+                check(ahead.choose_tier("openai") == "full" and not ahead.within_pace("openai"), "20% spent on the first day is the full tier but ahead of the pace")
+                ahead.save()
+                reports, requests, _ = run_bot(Path(folder) / "ledger.json", questions()[:1])
+                line = json.loads((Path(folder) / "forecast_log.jsonl").read_text().splitlines()[0])
+                check(
+                    [f["provider"] for f in line["shadow"]] == ["anthropic"] and len(line["submitted"]) == 6,
+                    "a provider ahead of the pace gets no shadow forecast, its submitted forecasts are unchanged",
+                )
+        finally:
+            restore_pace()
 
         restore_cap = _with_env(BOT_DEEP_MAX_PER_RUN="1")
         try:
